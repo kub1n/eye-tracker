@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#2F6F62">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="manifest" href="./manifest.json">
 <title>Трекер лікування — блефарит</title>
 <style>
   :root {
@@ -53,13 +58,23 @@
   #resetBtn { margin-top: 12px; background: none; border: none; font-size: 12px; color: #8A9A94; font-family: monospace; cursor: pointer; }
   #savedNote { font-size: 11px; color: #8A9A94; font-family: monospace; margin-top: 8px; min-height: 14px; }
   #storageWarning { background: var(--amber-soft); border: 1px solid var(--amber-border); border-radius: 12px; padding: 10px 12px; font-size: 12px; color: var(--amber-dark); margin-bottom: 16px; display: none; }
-  .sync-box { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
-  .sync-box summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
-  .sync-box summary::-webkit-details-marker { display: none; }
+  .box { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+  .box summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+  .box summary::-webkit-details-marker { display: none; }
   .sync-row { display: flex; gap: 6px; margin-top: 10px; }
   .sync-row input { flex: 1; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); font-family: monospace; }
   .sync-row button { font-size: 12px; padding: 8px 12px; border-radius: 8px; border: none; background: var(--teal); color: #fff; }
-  .sync-status { font-size: 11px; font-family: monospace; margin-top: 6px; }
+  .status-line { font-size: 11px; font-family: monospace; margin-top: 6px; }
+  .notif-btn { margin-top: 10px; font-size: 12px; padding: 8px 12px; border-radius: 8px; border: none; background: var(--teal); color: #fff; width: 100%; }
+  .hint { font-size: 11px; color: var(--ink-soft); }
+  .stat-summary { display: flex; justify-content: space-between; margin: 6px 0 14px; }
+  .stat-summary > div { display: flex; flex-direction: column; }
+  .stat-big { font-size: 22px; }
+  .stat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .stat-date { width: 52px; font-size: 11px; font-family: monospace; color: var(--ink-soft); }
+  .stat-bar { flex: 1; height: 6px; border-radius: 999px; background: #E9EEEC; overflow: hidden; }
+  .stat-fill { height: 100%; background: var(--teal); }
+  .stat-pct { width: 42px; text-align: right; font-size: 11px; font-family: monospace; color: var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -82,24 +97,36 @@
       </div>
     </div>
 
-    <details class="sync-box" id="syncBox">
+    <details class="box">
       <summary>🔗 Google Таблиця (синхронізація)</summary>
       <div class="sync-row">
         <input id="apiUrlInput" type="url" placeholder="Встав Web App URL з Apps Script">
         <button id="saveApiUrl">Зберегти</button>
       </div>
-      <div class="sync-status" id="syncStatus"></div>
+      <div class="status-line" id="syncStatus"></div>
+    </details>
+
+    <details class="box">
+      <summary>🔔 Сповіщення на телефон</summary>
+      <p class="hint">Спрацьовують, поки застосунок відкритий (в тому числі згорнутий на деякий час). Не замінюють нагадування, коли застосунок повністю закритий.</p>
+      <button class="notif-btn" id="enableNotif">Увімкнути сповіщення</button>
+      <div class="status-line" id="notifStatus"></div>
+    </details>
+
+    <details class="box">
+      <summary>📊 Статистика курсу</summary>
+      <div id="statsContent"><p class="hint">Завантаження…</p></div>
     </details>
 
     <div id="storageWarning">⚠ Цей браузер блокує локальне збереження (напр. приватний режим). Дані не зберігатимуться між сеансами.</div>
     <div id="banner"></div>
     <div id="cards"></div>
 
-    <button class="completed-toggle" id="completedToggle">Завершені курси (1) ▾</button>
+    <button class="completed-toggle" id="completedToggle">Завершені курси ▾</button>
     <div id="completedList" style="display:none"></div>
 
     <footer>
-      <p>👁 Без налаштованої Google Таблиці дані зберігаються лише в цьому браузері. Додайте посилання вище, щоб бачити ті самі позначки з будь-якого браузера чи пристрою.</p>
+      <p>👁 Без налаштованої Google Таблиці дані зберігаються лише в цьому браузері.</p>
       <div id="savedNote"></div>
       <button id="resetBtn">↺ скинути сьогоднішні позначки</button>
     </footer>
@@ -107,6 +134,12 @@
 
 <script>
 const MEDICATIONS = [
+  { id:'navibleaf', name:'Навіблеф ТТО', sub:'щоденний догляд, пінка', instruction:'Умиватися вранці та ввечері, залишити пінку на повіках на 60 секунд',
+    start:'2026-05-16', end:'2026-06-29',
+    doses:[
+      {id:'ranok', label:'🌅 Ранок', bracket:'ranok'},
+      {id:'vechir', label:'🌇 Вечір', bracket:'vechir'},
+    ]},
   { id:'oftalipid', name:'Офталіпід', sub:'очні краплі 0.5 мл', instruction:'По 1 краплі в обидва ока',
     start:'2026-05-01', end:'2026-07-29',
     doses:[
@@ -133,14 +166,12 @@ const MEDICATIONS = [
     start:'2026-07-22', end:'2026-08-04',
     doses:[ {id:'nich', label:'🌙 Перед сном', bracket:'nich'} ]},
 ];
-const COMPLETED = [
-  { name:'Навіблеф ТТО', sub:'щоденний догляд, пінка', end:'2026-06-29' },
-];
 const DUE_HOUR = { ranok:12, den:18, vechir:22, nich:23 };
 
 const pad = n => n < 10 ? '0'+n : ''+n;
 const toISO = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const daysBetween = (a,b) => Math.round((new Date(b)-new Date(a))/86400000);
+const isActiveOn = (m, date) => date >= m.start && date <= m.end;
 
 let storageOK = true;
 let apiUrl = '';
@@ -154,11 +185,13 @@ function localSet(key, obj) {
   try { localStorage.setItem(key, JSON.stringify(obj)); } catch { storageOK = false; }
 }
 
-const now = new Date();
-const todayStr = toISO(now);
-const storageKey = 'blepharitis-tracker:doses:' + todayStr;
-let doneMap = localGet(storageKey); // instant local render, refined by sheet fetch below
-const activeMeds = MEDICATIONS.filter(m => todayStr >= m.start && todayStr <= m.end);
+let now = new Date();
+let todayStr = toISO(now);
+let storageKey = 'blepharitis-tracker:doses:' + todayStr;
+let doneMap = localGet(storageKey);
+let notifKey = 'blepharitis-tracker:notified:' + todayStr;
+let notifiedToday = localGet(notifKey);
+
 const isOverdue = (bracket, checked) => !checked && now.getHours() >= DUE_HOUR[bracket];
 
 function setSyncStatus(text, ok) {
@@ -184,22 +217,98 @@ async function loadFromSheet() {
 async function pushToSheet(medId, doseId, medName, doseLabel, checked) {
   if (!apiUrl) return;
   try {
-    await fetch(apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({ date: todayStr, medId, doseId, medName, doseLabel, checked }),
-    });
+    await fetch(apiUrl, { method: 'POST', body: JSON.stringify({ date: todayStr, medId, doseId, medName, doseLabel, checked }) });
     setSyncStatus('🟢 синхронізовано', true);
+    loadHistory();
   } catch {
     setSyncStatus('🔴 записано локально, але не в таблицю (перевірте інтернет)', false);
   }
+}
+
+async function loadHistory() {
+  const el = document.getElementById('statsContent');
+  if (!apiUrl) { el.innerHTML = '<p class="hint">Додайте посилання на Google Таблицю вище, щоб побачити статистику.</p>'; return; }
+  try {
+    const res = await fetch(apiUrl + '?mode=history');
+    const rows = await res.json();
+    renderStats(rows);
+  } catch {
+    el.innerHTML = '<p class="hint">Не вдалось завантажити статистику.</p>';
+  }
+}
+
+function renderStats(rows) {
+  const el = document.getElementById('statsContent');
+  if (!rows.length) { el.innerHTML = '<p class="hint">Ще немає збережених позначок.</p>'; return; }
+
+  const doneSet = new Set(rows.filter(r => r.checked).map(r => r.date + '|' + r.medId + '|' + r.doseId));
+  const historyStart = rows.reduce((min, r) => (r.date < min ? r.date : min), rows[0].date);
+
+  const dates = [];
+  for (let d = new Date(historyStart); toISO(d) <= todayStr; d.setDate(d.getDate() + 1)) dates.push(toISO(d));
+
+  let totalExpected = 0, totalDone = 0;
+  const perDay = dates.map(date => {
+    let expected = 0, done = 0;
+    MEDICATIONS.filter(m => isActiveOn(m, date)).forEach(m => m.doses.forEach(d => {
+      expected++;
+      if (doneSet.has(date + '|' + m.id + '|' + d.id)) done++;
+    }));
+    totalExpected += expected; totalDone += done;
+    return { date, expected, done };
+  });
+
+  const overallPct = totalExpected ? Math.round(totalDone / totalExpected * 100) : 0;
+
+  let streak = 0;
+  for (let i = perDay.length - 1; i >= 0; i--) {
+    const day = perDay[i];
+    if (day.date === todayStr) continue;
+    if (day.expected === 0) continue;
+    if (day.done === day.expected) streak++;
+    else break;
+  }
+
+  const rowsHtml = perDay.slice(-10).reverse().map(d => {
+    const pct = d.expected ? Math.round(d.done / d.expected * 100) : 0;
+    const label = new Date(d.date).toLocaleDateString('uk-UA', { day:'numeric', month:'short' });
+    return `<div class="stat-row"><span class="stat-date">${label}</span><div class="stat-bar"><div class="stat-fill" style="width:${pct}%"></div></div><span class="stat-pct">${d.done}/${d.expected}</span></div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="stat-summary">
+      <div><span class="disp stat-big">${overallPct}%</span><span class="hint">виконано з ${historyStart.split('-').reverse().join('.')}</span></div>
+      <div><span class="disp stat-big">🔥 ${streak}</span><span class="hint">днів поспіль без пропусків</span></div>
+    </div>
+    ${rowsHtml}
+  `;
+}
+
+function updateNotifStatus() {
+  const el = document.getElementById('notifStatus');
+  if (!('Notification' in window)) { el.textContent = 'цей браузер не підтримує сповіщення'; return; }
+  if (Notification.permission === 'granted') el.textContent = '🟢 увімкнено';
+  else if (Notification.permission === 'denied') el.textContent = '🔴 заблоковано в налаштуваннях браузера';
+  else el.textContent = '⚪ ще не увімкнено';
+}
+
+function checkAndNotify(overdue) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  overdue.forEach(o => {
+    const key = o.medId + ':' + o.doseId;
+    if (!notifiedToday[key]) {
+      new Notification('Час прийому 💧', { body: `${o.medName} — ${o.label}`, icon: './icon-192.png' });
+      notifiedToday[key] = true;
+      localSet(notifKey, notifiedToday);
+    }
+  });
 }
 
 function toggle(medId, doseId) {
   const key = medId + ':' + doseId;
   doneMap[key] = !doneMap[key];
   localSet(storageKey, doneMap);
-  document.getElementById('savedNote').textContent =
-    'збережено о ' + pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
+  document.getElementById('savedNote').textContent = 'збережено о ' + pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
   render();
 
   const med = MEDICATIONS.find(m => m.id === medId);
@@ -214,6 +323,20 @@ function resetToday() {
   render();
 }
 
+function refreshClock() {
+  now = new Date();
+  const newToday = toISO(now);
+  if (newToday !== todayStr) {
+    todayStr = newToday;
+    storageKey = 'blepharitis-tracker:doses:' + todayStr;
+    notifKey = 'blepharitis-tracker:notified:' + todayStr;
+    doneMap = localGet(storageKey);
+    notifiedToday = localGet(notifKey);
+    loadFromSheet();
+  }
+  render();
+}
+
 function render() {
   document.getElementById('storageWarning').style.display = storageOK ? 'none' : 'block';
 
@@ -221,6 +344,9 @@ function render() {
     (now.getHours() < 12 ? 'Доброго ранку' : now.getHours() < 18 ? 'Доброго дня' : 'Доброго вечора') + ', Іване';
   document.getElementById('dateLabel').textContent =
     now.toLocaleDateString('uk-UA', { weekday:'long', day:'numeric', month:'long' });
+
+  const activeMeds = MEDICATIONS.filter(m => isActiveOn(m, todayStr));
+  const completedMeds = MEDICATIONS.filter(m => todayStr > m.end);
 
   let total = 0, checked = 0;
   const overdue = [];
@@ -230,6 +356,7 @@ function render() {
     if (doneMap[key]) checked++;
     if (isOverdue(d.bracket, !!doneMap[key])) overdue.push({medId:m.id, doseId:d.id, medName:m.name, label:d.label});
   }));
+  checkAndNotify(overdue);
 
   const r = 52, circ = 2*Math.PI*r, pct = total ? checked/total : 0;
   const ring = document.getElementById('ringFill');
@@ -286,10 +413,10 @@ function render() {
     cardsEl.appendChild(card);
   });
 
-  document.getElementById('completedToggle').textContent = `Завершені курси (${COMPLETED.length}) ▾`;
+  document.getElementById('completedToggle').textContent = `Завершені курси (${completedMeds.length}) ▾`;
   const compList = document.getElementById('completedList');
   compList.innerHTML = '';
-  COMPLETED.forEach(m => {
+  completedMeds.forEach(m => {
     const div = document.createElement('div');
     div.className = 'completed-card';
     div.innerHTML = `<div><p>${m.name}</p><p class="sub">до ${m.end.split('-').reverse().join('.')}</p></div><span>✓</span>`;
@@ -301,7 +428,6 @@ document.getElementById('completedToggle').onclick = () => {
   const el = document.getElementById('completedList');
   const open = el.style.display !== 'none';
   el.style.display = open ? 'none' : 'block';
-  document.getElementById('completedToggle').textContent = `Завершені курси (${COMPLETED.length}) ${open ? '▾' : '▴'}`;
 };
 document.getElementById('resetBtn').onclick = resetToday;
 
@@ -310,10 +436,24 @@ document.getElementById('saveApiUrl').onclick = () => {
   apiUrl = document.getElementById('apiUrlInput').value.trim();
   try { localStorage.setItem('blepharitis-tracker:apiUrl', apiUrl); } catch { storageOK = false; }
   loadFromSheet();
+  loadHistory();
 };
+
+document.getElementById('enableNotif').onclick = async () => {
+  if (!('Notification' in window)) return;
+  await Notification.requestPermission();
+  updateNotifStatus();
+};
+updateNotifStatus();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
 
 render();
 loadFromSheet();
+loadHistory();
+setInterval(refreshClock, 60000);
 </script>
 </body>
 </html>
