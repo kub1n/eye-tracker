@@ -28,7 +28,11 @@
   .center { text-align: center; }
   h1 { font-size: 22px; margin: 4px 0 0; }
   .eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 0; }
-  .ring-wrap { position: relative; width: 132px; height: 132px; margin: 20px auto 4px; }
+  .date-nav { display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .nav-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: #fff; color: var(--ink); font-size: 16px; line-height: 1; cursor: pointer; }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+  .jump-today { display: block; margin: 4px auto 0; background: none; border: none; font-size: 11px; color: var(--teal); font-family: monospace; cursor: pointer; }
+  .ring-wrap { position: relative; width: 132px; height: 132px; margin: 16px auto 4px; }
   .ring-wrap svg { position: absolute; top: 0; left: 0; }
   .ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .ring-label .num { font-size: 22px; }
@@ -49,6 +53,7 @@
   .dose-btn.late { background: var(--amber-soft); border-color: var(--amber-border); color: var(--amber-dark); }
   .bar { height: 6px; border-radius: 999px; background: #E9EEEC; overflow: hidden; }
   .bar-fill { height: 100%; background: var(--teal); transition: width .3s ease; }
+  .empty-note { text-align: center; font-size: 13px; color: var(--ink-soft); padding: 20px 0; }
   .completed-toggle { display: block; margin: 20px auto 0; background: none; border: none; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
   .completed-card { background: #F0F4F3; border-radius: 12px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .completed-card p { margin: 0; font-size: 13px; }
@@ -80,8 +85,15 @@
 <body>
   <div class="wrap">
     <div class="center">
-      <p class="eyebrow" id="greeting"></p>
-      <h1 class="disp" id="dateLabel"></h1>
+      <div class="date-nav">
+        <button class="nav-btn" id="prevDay" aria-label="попередній день">‹</button>
+        <div>
+          <p class="eyebrow" id="greeting"></p>
+          <h1 class="disp" id="dateLabel"></h1>
+        </div>
+        <button class="nav-btn" id="nextDay" aria-label="наступний день">›</button>
+      </div>
+      <button class="jump-today" id="jumpToday" style="display:none">↦ повернутися до сьогодні</button>
       <div class="ring-wrap">
         <svg width="132" height="132" style="opacity:.35">
           <path d="M 18 40 Q 66 8 114 40" stroke="#4A5F58" stroke-width="1.5" fill="none" stroke-linecap="round"/>
@@ -128,14 +140,20 @@
     <footer>
       <p>👁 Без налаштованої Google Таблиці дані зберігаються лише в цьому браузері.</p>
       <div id="savedNote"></div>
-      <button id="resetBtn">↺ скинути сьогоднішні позначки</button>
+      <button id="resetBtn">↺ скинути позначки</button>
     </footer>
   </div>
 
 <script>
 const MEDICATIONS = [
-  { id:'navibleaf', name:'Навіблеф ТТО', sub:'щоденний догляд, пінка', instruction:'Умиватися вранці та ввечері, залишити пінку на повіках на 60 секунд',
+  { id:'navibleaf', name:'Навіблеф ТТО', sub:'щоденний догляд, пінка (курс 1)', instruction:'Умиватися вранці та ввечері, залишити пінку на повіках на 60 секунд',
     start:'2026-05-16', end:'2026-06-29',
+    doses:[
+      {id:'ranok', label:'🌅 Ранок', bracket:'ranok'},
+      {id:'vechir', label:'🌇 Вечір', bracket:'vechir'},
+    ]},
+  { id:'navibleaf2', name:'Навіблеф ТТО', sub:'щоденний догляд, пінка (курс 2)', instruction:'Умиватися вранці та ввечері, залишити пінку на повіках на 60 секунд',
+    start:'2026-07-25', end:'2026-10-22',
     doses:[
       {id:'ranok', label:'🌅 Ранок', bracket:'ranok'},
       {id:'vechir', label:'🌇 Вечір', bracket:'vechir'},
@@ -167,11 +185,13 @@ const MEDICATIONS = [
     doses:[ {id:'nich', label:'🌙 Перед сном', bracket:'nich'} ]},
 ];
 const DUE_HOUR = { ranok:12, den:18, vechir:22, nich:23 };
+const MIN_DATE = MEDICATIONS.reduce((min, m) => (m.start < min ? m.start : min), MEDICATIONS[0].start);
 
 const pad = n => n < 10 ? '0'+n : ''+n;
 const toISO = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const daysBetween = (a,b) => Math.round((new Date(b)-new Date(a))/86400000);
 const isActiveOn = (m, date) => date >= m.start && date <= m.end;
+const shiftDate = (dateStr, delta) => { const d = new Date(dateStr); d.setDate(d.getDate() + delta); return toISO(d); };
 
 let storageOK = true;
 let apiUrl = '';
@@ -184,15 +204,21 @@ function localGet(key) {
 function localSet(key, obj) {
   try { localStorage.setItem(key, JSON.stringify(obj)); } catch { storageOK = false; }
 }
+const doseStorageKey = date => 'blepharitis-tracker:doses:' + date;
 
 let now = new Date();
 let todayStr = toISO(now);
-let storageKey = 'blepharitis-tracker:doses:' + todayStr;
-let doneMap = localGet(storageKey);
+let selectedDate = todayStr;
+let doneMap = localGet(doseStorageKey(selectedDate));
 let notifKey = 'blepharitis-tracker:notified:' + todayStr;
 let notifiedToday = localGet(notifKey);
 
-const isOverdue = (bracket, checked) => !checked && now.getHours() >= DUE_HOUR[bracket];
+function isOverdue(bracket, checked) {
+  if (checked) return false;
+  if (selectedDate < todayStr) return true;   // минулий день — усе неvідмічене вважається пропущеним
+  if (selectedDate > todayStr) return false;  // майбутнє — не буває (кнопка недоступна)
+  return now.getHours() >= DUE_HOUR[bracket]; // сьогодні — за розкладом
+}
 
 function setSyncStatus(text, ok) {
   const el = document.getElementById('syncStatus');
@@ -200,24 +226,26 @@ function setSyncStatus(text, ok) {
   el.style.color = ok === false ? '#B0592B' : ok === true ? '#2F6F62' : '#8A9A94';
 }
 
-async function loadFromSheet() {
+async function loadFromSheetForDate(date) {
   if (!apiUrl) { setSyncStatus('⚪ лише локально (посилання не додано)', null); return; }
   try {
-    const res = await fetch(apiUrl + '?date=' + todayStr);
+    const res = await fetch(apiUrl + '?date=' + date);
     const remote = await res.json();
-    doneMap = { ...doneMap, ...remote };
-    localSet(storageKey, doneMap);
+    if (date === selectedDate) {
+      doneMap = { ...doneMap, ...remote };
+      localSet(doseStorageKey(date), doneMap);
+      render();
+    }
     setSyncStatus('🟢 синхронізовано', true);
-    render();
   } catch {
     setSyncStatus('🔴 не вдалось завантажити з таблиці, показано локальні дані', false);
   }
 }
 
-async function pushToSheet(medId, doseId, medName, doseLabel, checked) {
+async function pushToSheet(date, medId, doseId, medName, doseLabel, checked) {
   if (!apiUrl) return;
   try {
-    await fetch(apiUrl, { method: 'POST', body: JSON.stringify({ date: todayStr, medId, doseId, medName, doseLabel, checked }) });
+    await fetch(apiUrl, { method: 'POST', body: JSON.stringify({ date, medId, doseId, medName, doseLabel, checked }) });
     setSyncStatus('🟢 синхронізовано', true);
     loadHistory();
   } catch {
@@ -293,6 +321,7 @@ function updateNotifStatus() {
 }
 
 function checkAndNotify(overdue) {
+  if (selectedDate !== todayStr) return; // не турбувати сповіщеннями під час перегляду історії
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   overdue.forEach(o => {
     const key = o.medId + ':' + o.doseId;
@@ -307,32 +336,39 @@ function checkAndNotify(overdue) {
 function toggle(medId, doseId) {
   const key = medId + ':' + doseId;
   doneMap[key] = !doneMap[key];
-  localSet(storageKey, doneMap);
+  localSet(doseStorageKey(selectedDate), doneMap);
   document.getElementById('savedNote').textContent = 'збережено о ' + pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
   render();
 
   const med = MEDICATIONS.find(m => m.id === medId);
   const dose = med.doses.find(d => d.id === doseId);
-  pushToSheet(medId, doseId, med.name, dose.label, doneMap[key]);
+  pushToSheet(selectedDate, medId, doseId, med.name, dose.label, doneMap[key]);
 }
 
-function resetToday() {
+function resetSelectedDay() {
   doneMap = {};
-  try { localStorage.removeItem(storageKey); } catch {}
+  try { localStorage.removeItem(doseStorageKey(selectedDate)); } catch {}
   document.getElementById('savedNote').textContent = '';
   render();
 }
 
+async function switchToDate(date) {
+  selectedDate = date;
+  doneMap = localGet(doseStorageKey(selectedDate));
+  document.getElementById('savedNote').textContent = '';
+  render();
+  await loadFromSheetForDate(selectedDate);
+}
+
 function refreshClock() {
+  const wasToday = (selectedDate === todayStr);
   now = new Date();
   const newToday = toISO(now);
   if (newToday !== todayStr) {
     todayStr = newToday;
-    storageKey = 'blepharitis-tracker:doses:' + todayStr;
     notifKey = 'blepharitis-tracker:notified:' + todayStr;
-    doneMap = localGet(storageKey);
     notifiedToday = localGet(notifKey);
-    loadFromSheet();
+    if (wasToday) { switchToDate(todayStr); return; }
   }
   render();
 }
@@ -340,12 +376,19 @@ function refreshClock() {
 function render() {
   document.getElementById('storageWarning').style.display = storageOK ? 'none' : 'block';
 
-  document.getElementById('greeting').textContent =
-    (now.getHours() < 12 ? 'Доброго ранку' : now.getHours() < 18 ? 'Доброго дня' : 'Доброго вечора') + ', Іване';
+  const isToday = selectedDate === todayStr;
+  const isYesterday = selectedDate === shiftDate(todayStr, -1);
+  document.getElementById('greeting').textContent = isToday
+    ? (now.getHours() < 12 ? 'Доброго ранку' : now.getHours() < 18 ? 'Доброго дня' : 'Доброго вечора') + ', Іване'
+    : isYesterday ? 'Вчора' : 'Минула дата';
   document.getElementById('dateLabel').textContent =
-    now.toLocaleDateString('uk-UA', { weekday:'long', day:'numeric', month:'long' });
+    new Date(selectedDate).toLocaleDateString('uk-UA', { weekday:'long', day:'numeric', month:'long' });
 
-  const activeMeds = MEDICATIONS.filter(m => isActiveOn(m, todayStr));
+  document.getElementById('prevDay').disabled = selectedDate <= MIN_DATE;
+  document.getElementById('nextDay').disabled = selectedDate >= todayStr;
+  document.getElementById('jumpToday').style.display = isToday ? 'none' : 'block';
+
+  const activeMeds = MEDICATIONS.filter(m => isActiveOn(m, selectedDate));
   const completedMeds = MEDICATIONS.filter(m => todayStr > m.end);
 
   let total = 0, checked = 0;
@@ -369,7 +412,10 @@ function render() {
   if (overdue.length) {
     const div = document.createElement('div');
     div.className = 'banner';
-    div.innerHTML = `<div class="banner-title">⚠ Пропущено ${overdue.length} ${overdue.length===1?'прийом':'прийоми'}</div>`;
+    const title = isToday
+      ? `⚠ Пропущено ${overdue.length} ${overdue.length===1?'прийом':'прийоми'}`
+      : `◻ Не позначено ${overdue.length} ${overdue.length===1?'прийом':'прийоми'} — можна проставити заднім числом`;
+    div.innerHTML = `<div class="banner-title">${title}</div>`;
     overdue.forEach(o => {
       const btn = document.createElement('button');
       btn.className = 'banner-item';
@@ -382,6 +428,9 @@ function render() {
 
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '';
+  if (!activeMeds.length) {
+    cardsEl.innerHTML = '<p class="empty-note">Немає активних препаратів на цю дату.</p>';
+  }
   activeMeds.forEach(m => {
     const daysLeft = daysBetween(todayStr, m.end);
     const medChecked = m.doses.filter(d => doneMap[m.id+':'+d.id]).length;
@@ -422,20 +471,26 @@ function render() {
     div.innerHTML = `<div><p>${m.name}</p><p class="sub">до ${m.end.split('-').reverse().join('.')}</p></div><span>✓</span>`;
     compList.appendChild(div);
   });
+
+  document.getElementById('resetBtn').textContent = '↺ скинути позначки за ' + (isToday ? 'сьогодні' : isYesterday ? 'вчора' : 'цей день');
 }
+
+document.getElementById('prevDay').onclick = () => switchToDate(shiftDate(selectedDate, -1));
+document.getElementById('nextDay').onclick = () => { if (selectedDate < todayStr) switchToDate(shiftDate(selectedDate, 1)); };
+document.getElementById('jumpToday').onclick = () => switchToDate(todayStr);
 
 document.getElementById('completedToggle').onclick = () => {
   const el = document.getElementById('completedList');
   const open = el.style.display !== 'none';
   el.style.display = open ? 'none' : 'block';
 };
-document.getElementById('resetBtn').onclick = resetToday;
+document.getElementById('resetBtn').onclick = resetSelectedDay;
 
 document.getElementById('apiUrlInput').value = apiUrl;
 document.getElementById('saveApiUrl').onclick = () => {
   apiUrl = document.getElementById('apiUrlInput').value.trim();
   try { localStorage.setItem('blepharitis-tracker:apiUrl', apiUrl); } catch { storageOK = false; }
-  loadFromSheet();
+  loadFromSheetForDate(selectedDate);
   loadHistory();
 };
 
@@ -451,7 +506,7 @@ if ('serviceWorker' in navigator) {
 }
 
 render();
-loadFromSheet();
+loadFromSheetForDate(selectedDate);
 loadHistory();
 setInterval(refreshClock, 60000);
 </script>
